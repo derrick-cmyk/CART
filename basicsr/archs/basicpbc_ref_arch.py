@@ -10,7 +10,34 @@ from pathlib import Path
 from random import randint, random
 from torch import nn
 from torch.nn import init
-from torch_scatter import scatter as super_pixel_pooling
+def super_pixel_pooling(src, index, reduce="mean", dim_size=None):
+    """Pure-PyTorch replacement for torch_scatter.scatter (mean only)."""
+    if src.dim() == 3:
+        n, c, l = src.shape
+        num_segments = dim_size if dim_size is not None else int(index.max().item()) + 1
+        out = torch.zeros(n, c, num_segments, device=src.device, dtype=src.dtype)
+        cnt = torch.zeros(n, 1, num_segments, device=src.device, dtype=src.dtype)
+        idx = index.unsqueeze(0).unsqueeze(0).expand(n, c, -1)
+        out.scatter_add_(2, idx, src)
+        cnt.scatter_add_(2, index.unsqueeze(0).unsqueeze(0).expand(n, 1, -1),
+                         torch.ones(n, 1, l, device=src.device, dtype=src.dtype))
+        cnt = cnt.clamp(min=1)
+        if reduce == "mean":
+            out = out / cnt
+        return out
+    else:
+        c, l = src.shape
+        num_segments = dim_size if dim_size is not None else int(index.max().item()) + 1
+        out = torch.zeros(c, num_segments, device=src.device, dtype=src.dtype)
+        cnt = torch.zeros(1, num_segments, device=src.device, dtype=src.dtype)
+        idx = index.unsqueeze(0).expand(c, -1)
+        out.scatter_add_(1, idx, src)
+        cnt.scatter_add_(1, index.unsqueeze(0),
+                         torch.ones(1, l, device=src.device, dtype=src.dtype))
+        cnt = cnt.clamp(min=1)
+        if reduce == "mean":
+            out = out / cnt
+        return out
 from torchvision.transforms.functional import to_pil_image
 
 from basicsr.utils.registry import ARCH_REGISTRY
@@ -502,7 +529,7 @@ def flow_warp(x, flow, interpolation="bilinear", padding_mode="zeros", align_cor
     _, _, h, w = x.size()
     # create mesh grid
     device = flow.device
-    grid_y, grid_x = torch.meshgrid(torch.arange(0, h, device=device), torch.arange(0, w, device=device))
+    grid_y, grid_x = torch.meshgrid(torch.arange(0, h, device=device), torch.arange(0, w, device=device), indexing='ij')
     grid = torch.stack((grid_x, grid_y), 2).type_as(x)  # (w, h, 2)
     grid.requires_grad = False
 
@@ -584,7 +611,7 @@ class BasicPBC_ref(nn.Module):
             }
 
             self.raft = RAFT(args)
-            state_dict = torch.load(args["ckpt"])
+            state_dict = torch.load(args["ckpt"], map_location=torch.device('cpu'), weights_only=True)
             real_state_dict = {k.split("module.")[-1]: v for k, v in state_dict.items()}
             self.raft.load_state_dict(real_state_dict)
             for param in self.raft.parameters():
@@ -599,6 +626,10 @@ class BasicPBC_ref(nn.Module):
         # tar
         input_tar = data["line"]
 
+        # RAFT and concatenation logic expect 3-channel RGB.
+        if input_tar.shape[1] > 3:
+            input_tar = input_tar[:, :3, :, :]
+
         if not self.config.wo_parsing:
             input_parse_tar = torch.cat([input_tar, data["parse_mask"]], dim=1)
             seq_parse_tar = self.desc_parse(input_parse_tar, data["segment"])[..., 1:]  # 1, d, n
@@ -607,6 +638,10 @@ class BasicPBC_ref(nn.Module):
 
         # ref
         input_ref = data["line_refs"]
+
+        if input_ref.shape[1] > 3:
+            input_ref = input_ref[:, :3, :, :]
+            
         seq_tag_ref = self.clip_text(data["used_tags_ref"])  # 1, d, m
         #print("seg_tag", seq_tag_ref, seq_tag_ref.shape)
         seg_tag_indices = [data["used_tags_ref"].index(tag) for tag in data["seg_tags_refs"]]  # indices of the segment tags
@@ -614,6 +649,8 @@ class BasicPBC_ref(nn.Module):
         if self.config.use_raft:
             h, w = input_tar.shape[-2:]
             color_ref = data["colored_gt_refs"]
+            if color_ref.shape[1] > 3:
+                color_ref = color_ref[:, :3, :, :]
             line_tar = F.interpolate(input_tar, self.config.raft_resolution, mode="bilinear", align_corners=False)
             line_ref = F.interpolate(input_ref, self.config.raft_resolution, mode="bilinear", align_corners=False)
             color_ref_resize = F.interpolate(color_ref, self.config.raft_resolution, mode="bilinear", align_corners=False)

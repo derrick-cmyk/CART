@@ -51,7 +51,34 @@ from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from torch import nn
-from torch_scatter import scatter as super_pixel_pooling
+def super_pixel_pooling(src, index, reduce="mean", dim_size=None):
+    """Pure-PyTorch replacement for torch_scatter.scatter (mean only)."""
+    if src.dim() == 3:
+        n, c, l = src.shape
+        num_segments = dim_size if dim_size is not None else int(index.max().item()) + 1
+        out = torch.zeros(n, c, num_segments, device=src.device, dtype=src.dtype)
+        cnt = torch.zeros(n, 1, num_segments, device=src.device, dtype=src.dtype)
+        idx = index.unsqueeze(0).unsqueeze(0).expand(n, c, -1)
+        out.scatter_add_(2, idx, src)
+        cnt.scatter_add_(2, index.unsqueeze(0).unsqueeze(0).expand(n, 1, -1),
+                         torch.ones(n, 1, l, device=src.device, dtype=src.dtype))
+        cnt = cnt.clamp(min=1)
+        if reduce == "mean":
+            out = out / cnt
+        return out
+    else:
+        c, l = src.shape
+        num_segments = dim_size if dim_size is not None else int(index.max().item()) + 1
+        out = torch.zeros(c, num_segments, device=src.device, dtype=src.dtype)
+        cnt = torch.zeros(1, num_segments, device=src.device, dtype=src.dtype)
+        idx = index.unsqueeze(0).expand(c, -1)
+        out.scatter_add_(1, idx, src)
+        cnt.scatter_add_(1, index.unsqueeze(0),
+                         torch.ones(1, l, device=src.device, dtype=src.dtype))
+        cnt = cnt.clamp(min=1)
+        if reduce == "mean":
+            out = out / cnt
+        return out
 
 from basicsr.utils.registry import ARCH_REGISTRY
 from raft.raft import RAFT
@@ -130,7 +157,7 @@ def flow_warp(x, flow, interpolation="bilinear", padding_mode="zeros", align_cor
     _, _, h, w = x.size()
     # create mesh grid
     device = flow.device
-    grid_y, grid_x = torch.meshgrid(torch.arange(0, h, device=device), torch.arange(0, w, device=device))
+    grid_y, grid_x = torch.meshgrid(torch.arange(0, h, device=device), torch.arange(0, w, device=device), indexing='ij')
     grid = torch.stack((grid_x, grid_y), 2).type_as(x)  # (w, h, 2)
     grid.requires_grad = False
 
@@ -147,7 +174,7 @@ class RaftWarper(nn.Module):
     def __init__(self, args) -> None:
         super().__init__()
         self.raft = RAFT(args)
-        state_dict = torch.load(args["ckpt"])
+        state_dict = torch.load(args["ckpt"], weights_only=True)
         real_state_dict = {k.split("module.")[-1]: v for k, v in state_dict.items()}
         self.raft.load_state_dict(real_state_dict)
         if args["freeze"]:
@@ -404,10 +431,22 @@ class BasicPBC_light(nn.Module):
     def forward(self, data):
         """Run SuperGlue on a pair of keypoints and descriptors"""
 
-        warpped_img = self.raft_warper(data["line"], data["line_ref"], data["recolorized_img"])
+        line = data["line"]
+        line_ref = data["line_ref"]
+        color_ref = data["recolorized_img"]
 
-        warpped_target_img = torch.cat((warpped_img, torch.mean(data["line"], dim=-3, keepdim=True)), dim=-3)
-        warpped_ref_img = torch.cat((data["recolorized_img"], torch.mean(data["line_ref"], dim=-3, keepdim=True)), dim=-3)
+        # RAFT expects 3-channel RGB. Slice if input is RGBA.
+        if line.shape[1] > 3:
+            line = line[:, :3, :, :]
+        if line_ref.shape[1] > 3:
+            line_ref = line_ref[:, :3, :, :]
+        if color_ref.shape[1] > 3:
+            color_ref = color_ref[:, :3, :, :]
+
+        warpped_img = self.raft_warper(line, line_ref, color_ref)
+
+        warpped_target_img = torch.cat((warpped_img, torch.mean(line, dim=-3, keepdim=True)), dim=-3)
+        warpped_ref_img = torch.cat((color_ref, torch.mean(line_ref, dim=-3, keepdim=True)), dim=-3)
 
         input_seq = img2boxseq(warpped_target_img, data["keypoints"], data["segment"], self.config.token_scale_list, self.config.token_crop_size)
         input_seq_ref = img2boxseq(warpped_ref_img, data["keypoints_ref"], data["segment_ref"], self.config.token_scale_list, self.config.token_crop_size)

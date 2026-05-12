@@ -82,9 +82,16 @@ class AnimeInferenceDataset(data.Dataset):
 
             seg_relabeled[mask] = i + 1  # 0 is for black line, start from 1
 
-        keypoints = np.stack(keypoints)
-        centerpoints = np.stack(centerpoints)
-        numpixels = np.stack(numpixels)
+        # Guard against empty segmentation (no regions found)
+        if len(keypoints) == 0:
+            keypoints = np.array([[0, w - 1, 0, h - 1]])
+            centerpoints = np.array([[w / 2.0, h / 2.0]])
+            numpixels = np.array([h * w])
+            seg_relabeled[:] = 1
+        else:
+            keypoints = np.stack(keypoints)
+            centerpoints = np.stack(centerpoints)
+            numpixels = np.stack(numpixels)
 
         return keypoints, centerpoints, numpixels, seg_relabeled
 
@@ -184,6 +191,12 @@ class PaintBucketInferenceDataset(AnimeInferenceDataset):
                     for fid in frame_ids
                     if fid not in all_gt and (fid - 1) in frame_to_path
                 }
+            elif self.mode == "backward":
+                index_map = {
+                    fid: fid + 1
+                    for fid in frame_ids
+                    if fid not in all_gt and (fid + 1) in frame_to_path
+                }
             elif self.mode == "nearest":
                 index_map = {
                     fid: self._get_ref_frame_id(fid, all_gt)
@@ -214,8 +227,7 @@ class PaintBucketInferenceDataset(AnimeInferenceDataset):
         print("Length of line frames to be colored:", len(self.data_list))
     def _get_ref_frame_id(self, index, all_gt):
         nearest_gt = min(all_gt, key=lambda x: abs(x - index))
-        ref_index = index - 1 if nearest_gt < index else index + 1
-        return ref_index
+        return nearest_gt
 
     def _sort_indices(self, index_map):
         adj_list = defaultdict(list)

@@ -1,20 +1,17 @@
 import argparse
 import os
 import torch
+import sys
 import torch.utils.data as data
 from glob import glob
 from os import path as osp
 from skimage import io, measure
-from torchvision.utils import save_image
 from torchvision.utils import save_image
 
 from basicsr.archs.basicpbc_arch import BasicPBC
 from basicsr.archs.basicpbc_light_arch import BasicPBC_light
 from basicsr.data.pbc_inference_dataset import PaintBucketInferenceDataset
 from basicsr.models.pbc_model import ModelInference
-from paint.colorlabel import ColorLabel
-from paint.lineart import LineArt, trappedball_fill
-from paint.utils import dump_json, np_2_labelpng, process_gt, read_line_2_np, read_seg_2_np, recolorize_seg
 from paint.colorlabel import ColorLabel
 from paint.lineart import LineArt, trappedball_fill
 from paint.utils import dump_json, np_2_labelpng, process_gt, read_line_2_np, read_seg_2_np, recolorize_seg, colorize_label_image
@@ -25,8 +22,13 @@ def extract_seg_from_color(color_img_path, line_path, seg_save_path):
     color_label.extract_label_map(color_img_path, seg_save_path, line_path, extract_seg=True)
 
 
-def extract_seg_from_line(line_path, seg_save_path, save_color_seg=False, color_save_path=None):
-    lineart = LineArt(read_line_2_np(line_path))
+def extract_seg_from_line(line_path, seg_save_path, save_color_seg=False, color_save_path=None, line_thr=50, treat_as_final=False):
+    try:
+        # Attempt to use the newer signature with thresholding support
+        lineart = LineArt(read_line_2_np(line_path, line_thr=line_thr, treat_as_final=treat_as_final))
+    except TypeError:
+        # Fallback for older versions of paint.utils.read_line_2_np
+        lineart = LineArt(read_line_2_np(line_path))
     lineart.label_color_line()
     seg_np = lineart.label_img
     seg = np_2_labelpng(seg_np)
@@ -50,7 +52,7 @@ def extract_color_dict(gt_path, seg_path):
     dump_json(color_dict, save_path)
 
 
-def generate_seg(path, seg_type="default", radius=4, save_color_seg=False, multi_clip=False):
+def generate_seg(path, seg_type="default", radius=4, save_color_seg=False, multi_clip=False, line_thr=50, treat_as_final=False):
     if seg_type == "trappedball":
         save_color_seg = True
 
@@ -84,8 +86,9 @@ def generate_seg(path, seg_type="default", radius=4, save_color_seg=False, multi
             seg_path = osp.join(seg_folder, name + ".png")
             seg_color_path = osp.join(seg_color_folder, name + ".png")
 
+            is_gt = name in gt_names
             if seg_type == "default":
-                extract_seg_from_line(line_path, seg_path, save_color_seg, seg_color_path)
+                extract_seg_from_line(line_path, seg_path, save_color_seg, seg_color_path, line_thr, treat_as_final and not is_gt)
             elif seg_type == "trappedball":
                 trappedball_fill(line_path, seg_color_path, radius, contour=True)
                 extract_seg_from_color(seg_color_path, line_path, seg_path)
@@ -98,8 +101,18 @@ def generate_seg(path, seg_type="default", radius=4, save_color_seg=False, multi
             print(f"{seg_path} created.")
 
 
-def load_params(model_path):
-    full_model = torch.load(model_path)
+# def load_params(model_path):
+#    full_model = torch.load(model_path)
+#    if "params_ema" in full_model:
+#        return full_model["params_ema"]
+#    elif "params" in full_model:
+#        return full_model["params"]
+#    else:
+#        return full_model
+
+def load_params(model_path, device):
+    # Map checkpoint to the specifically requested device
+    full_model = torch.load(model_path, map_location=device, weights_only=True)
     if "params_ema" in full_model:
         return full_model["params_ema"]
     elif "params" in full_model:
@@ -107,12 +120,11 @@ def load_params(model_path):
     else:
         return full_model
 
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--path", type=str, default="dataset/test/laughing_girl", help="path to your anime clip folder or folder containing multiple clips.")
-    parser.add_argument("--mode", choices=["forward", "nearest"], default="forward", help="")
+    parser.add_argument("--mode", choices=["forward", "backward", "nearest", "auto"], default="auto", help="")
     parser.add_argument("--seg_type", choices=["default", "trappedball"], default="default", help="choose `trappedball` if line art not closed.")
     parser.add_argument("--skip_seg", action="store_true", help="used when `seg` already exists.")
     parser.add_argument("--radius", type=int, default=4, help="used together with `--seg_type trappedball`. Increase the value if unclosed pixels' high.")
@@ -121,6 +133,9 @@ if __name__ == "__main__":
     parser.add_argument("--multi_clip", action="store_true", help="used for multi-clip inference. Set `path` to a folder where each sub-folder is a single clip.")
     parser.add_argument("--keep_line", action="store_true", help="used for keeping the original line in the final output.")
     parser.add_argument("--raft_res", type=int, default=320, help="change the resolution for the optical flow estimation. If the performance is bad on your case, you can change this to 640 to have a try.")
+    parser.add_argument("--line_thr", type=int, default=50, help="threshold for line mask extraction")
+    parser.add_argument("--treat_as_final", action="store_true", help="bypass line masking and treat line images as final")
+    parser.add_argument("--force_cpu", action="store_true", help="Force CPU usage even if CUDA is available.")
 
     args = parser.parse_args()
 
@@ -134,9 +149,12 @@ if __name__ == "__main__":
     multi_clip = args.multi_clip
     raft_resolution= args.raft_res
     keep_line= args.keep_line
+    line_thr = args.line_thr
+    treat_as_final = args.treat_as_final
+    force_cpu = args.force_cpu
 
     if not skip_seg:
-        generate_seg(path, seg_type, radius, save_color_seg, multi_clip)
+        generate_seg(path, seg_type, radius, save_color_seg, multi_clip, line_thr, treat_as_final)
 
     if use_light_model:
         ckpt_path = "ckpt/basicpbc_light.pth"
@@ -161,13 +179,39 @@ if __name__ == "__main__":
             clip_resolution=(320, 320),
         )
 
-    model = model.cuda()
-    model.load_state_dict(load_params(ckpt_path))
+    if force_cpu:
+        device = torch.device('cpu')
+    else:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    print("\n" + "*" * 50)
+    if device.type == 'cuda':
+        print(f" STATUS: Running on GPU (CUDA) [OK]")
+        print(f" DEVICE: {torch.cuda.get_device_name(0)}")
+    else:
+        print(f" STATUS: Running on CPU [WARN]")
+    print("*" * 50 + "\n")
+
+    model = model.to(device)
+    model.load_state_dict(load_params(ckpt_path, device))
     model.eval()
 
-    opt = {"root": path, "multi_clip": multi_clip, "mode": mode}
+    # Workaround: The dataset class doesn't handle 'auto' mode in its constructor yet.
+    # We pass 'forward' to let it initialize correctly, then set it back to 'auto'
+    # so the ModelInference knows to use the smart logic.
+    dataset_mode = 'forward' if mode == 'auto' else mode
+    opt = {"root": path, "multi_clip": multi_clip, "mode": dataset_mode}
     dataset = PaintBucketInferenceDataset(opt)
+    if mode == 'auto':
+        dataset.opt['mode'] = 'auto'
+        
     dataloader = data.DataLoader(dataset, batch_size=1)
 
     model_inference = ModelInference(model, dataloader)
-    model_inference.inference_multi_gt(path,keep_line)
+
+    # If not multi_clip, the model expects the parent directory 
+    # because it uses the basename of the path as the clip name.
+    if not multi_clip:
+        model_inference.inference_multi_gt(os.path.dirname(os.path.abspath(path)), keep_line)
+    else:
+        model_inference.inference_multi_gt(path, keep_line)

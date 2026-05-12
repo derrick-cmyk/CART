@@ -111,6 +111,9 @@ def trapped_ball_fill_multi(image, radius, method="mean", max_iter=1000):
 
     filled_area_size = np.asarray(filled_area_size)
 
+    if len(filled_area_size) == 0:
+        return result
+
     if method == "max":
         area_size_filter = np.max(filled_area_size)
     elif method == "median":

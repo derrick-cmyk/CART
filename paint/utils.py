@@ -7,7 +7,7 @@ from glob import glob
 from PIL import Image
 from skimage import io
 from skimage.measure import label
-from skimage.morphology import binary_dilation, square
+from skimage.morphology import binary_dilation, square, footprint_rectangle
 from tqdm import tqdm
 from skimage.restoration import inpaint
 
@@ -256,7 +256,10 @@ def find_adjacent_labels(label_image, sq_neighbor=False):
     adjacency_dict = {str(label): set() for label in np.unique(label_image) if label != 0}
 
     # Step 3: Define a square neighborhood for dilation
-    neighborhood = square(3)
+    try:
+        neighborhood = footprint_rectangle((3, 3))
+    except AttributeError:
+        neighborhood = square(3)
 
     # Step 4: Iterate through each label and find adjacent labels
     for current_label in adjacency_dict.keys():
@@ -278,7 +281,10 @@ def find_adjacent_labels(label_image, sq_neighbor=False):
 
 def expand_label_img(label_image, num_iter=2):
     # Expand the label to fill the zero region (black line)
-    neighborhood = square(3)
+    try:
+        neighborhood = footprint_rectangle((3, 3))
+    except AttributeError:
+        neighborhood = square(3)
     labels = np.unique(label_image)
     for i in range(num_iter):
         for label in labels[1:]:  # Skip label 0 (background)
@@ -301,7 +307,9 @@ def colorize_label_image(label_img_path, json_path, save_path, using="color"):
     if using == "label":
         color_dict = {k: default_colorbook[v] + [255] for k, v in json_dict.items()}
     color_index = np.array(list(color_dict.values()))
-    color_index = np.insert(color_index, 0, [0, 0, 0, 255], axis=0)
+    num_channels = color_index.shape[1] if color_index.ndim == 2 else 3
+    black_row = [0, 0, 0, 255][:num_channels]
+    color_index = np.insert(color_index, 0, black_row, axis=0)
 
     h, w = label_img.shape
     # colored_img = np.zeros((h, w, 4), dtype=np.uint8)
@@ -670,16 +678,51 @@ def evaluate(result_tuple, mode="Default", split_interval=None, save_path=None, 
             print(f"CSV file saved at {save_path}")
     return output_avg_dict, output_camera_dict, output_datafolder_dict
 
-def read_line_2_np(img_path, channel=4):
+def read_line_2_np(img_path, channel=4, line_thr=50, treat_as_final=False):
     img = Image.open(img_path)
     img_np = np.array(img)
 
+    if treat_as_final:
+        if img.mode == "RGB":
+            mask = ~np.all(img_np[:, :, :3] == 255, axis=-1)
+            line = np.zeros((*img_np.shape[:2], 4), dtype=np.uint8)
+            line[:, :, :3] = img_np
+            line[:, :, 3] = np.where(mask, 255, 0)
+
+            # Safety check: ensure at least one line pixel exists in final mode
+            if not np.any(mask):
+                line[0, 0, :3] = 0 # Force a black safety pixel
+                line[0, 0, 3] = 255
+                
+        elif img.mode == "RGBA":
+            line = img_np
+            if not np.any(line[:, :, 3] > 0):
+                line[0, 0, :3] = 0
+                line[0, 0, 3] = 255
+        else:
+            line = img_np
+        return line[..., :channel]
+
     if img.mode == "RGBA":
         alpha_channel = img_np[:, :, 3]
-        mask = alpha_channel > 100  # Line detection based on alpha value, default is 10
-    elif img.mode == "RGB":
+        # If the image is mostly opaque, fallback to grayscale thresholding
+        if np.mean(alpha_channel) > 250:
+            grayscale = np.mean(img_np[:, :, :3], axis=2)
+            mask = grayscale < line_thr
+        else:
+            mask = alpha_channel > 100  # Line detection based on alpha value
+    else:
         grayscale = np.mean(img_np[:, :, :3], axis=2)
-        mask = grayscale < 150  # Line detection based on grayscale value, default is 245
+        mask = grayscale < line_thr  # Line detection based on grayscale value
+
+    # Safety check: ensure there is at least one line pixel and one background pixel.
+    # This prevents 'ValueError: zero-size array' during bounding box calculation in the dataset loader.
+    if np.all(mask):
+        mask[0, 0] = False
+    
+    if not np.any(mask):
+        mask[0, 0] = True
+        img_np[0, 0, :3] = 0 # Ensure safety pixel is black in source
 
     line = np.zeros((*img_np.shape[:2], 4), dtype=np.uint8)
     line[:, :, :3] = 255  # Set all RGB to white

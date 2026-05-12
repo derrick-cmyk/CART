@@ -36,7 +36,10 @@ class LineArt:
     def erase_single_pixels(self, threshold=2):
         # Remove all regions with pixels less than threshold
         props = measure.regionprops(self.label_img)
-        selem = morphology.square(3)
+        try:
+            selem = morphology.footprint_rectangle((3, 3))
+        except AttributeError:
+            selem = morphology.square(3)
         # print(self.label_img.max()+1)
         for i in range(1, self.label_img.max() + 1):
             if props[i - 1].area <= threshold:

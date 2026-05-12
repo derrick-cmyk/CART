@@ -424,24 +424,27 @@ class ModelInference:
         # color_dict['0']=[0,0,0,255] #black line
         json_save_path = osp.join(save_folder, name_str + ".json")
 
-        match = pred["matches0"].cpu().numpy()
-        match_scores = pred["match_scores"].cpu().numpy()
-
-        color_next_frame = {}
-        if not accu:
-            for i, item in enumerate(match):
-                if item == -1:
-                    # This segment cannot be matched
-                    color_next_frame[str(i + 1)] = [0, 0, 0, 0]
-                else:
-                    color_next_frame[str(i + 1)] = color_dict[str(item + 1)]
+        if "match_scores" not in pred:
+            print(f"Warning: No valid segments or keypoints for {name_str}, copying reference colors.")
+            color_next_frame = color_dict
         else:
-            for i, scores in enumerate(match_scores):
-                color_lookup = np.array([color_dict[str(i + 1)] if str(i + 1) in color_dict else [0, 0, 0, 0] for i in range(len(scores))])
-                unique_colors = np.unique(color_lookup, axis=0)
-                accumulated_probs = [np.sum(scores[np.all(color_lookup == color, axis=1)]) for color in unique_colors]
-                color_next_frame[str(i + 1)] = unique_colors[np.argmax(accumulated_probs)].tolist()
-        # color_next_frame.pop('0')
+            match = pred["matches0"].cpu().numpy()
+            match_scores = pred["match_scores"].cpu().numpy()
+
+            color_next_frame = {}
+            if not accu:
+                for i, item in enumerate(match):
+                    if item == -1:
+                        color_next_frame[str(i + 1)] = [0, 0, 0, 0]
+                    else:
+                        color_next_frame[str(i + 1)] = color_dict[str(item + 1)]
+            else:
+                for i, scores in enumerate(match_scores):
+                    color_lookup = np.array([color_dict[str(i + 1)] if str(i + 1) in color_dict else [0, 0, 0, 0] for i in range(len(scores))])
+                    unique_colors = np.unique(color_lookup, axis=0)
+                    accumulated_probs = [np.sum(scores[np.all(color_lookup == color, axis=1)]) for color in unique_colors]
+                    color_next_frame[str(i + 1)] = unique_colors[np.argmax(accumulated_probs)].tolist()
+        
         dump_json(color_next_frame, json_save_path)
         if save_img or self_prop:
             label_path = osp.join(osp.split(root)[0], "seg", name_str + ".png")
@@ -482,10 +485,14 @@ class ModelInference:
 
         json_save_path = osp.join(save_folder, name_str + ".json")
 
-        match = pred["matches0"].cpu().numpy()
-        match_scores = pred["match_scores"].cpu().numpy()
+        if "match_scores" not in pred:
+            print(f"Warning: No valid segments or keypoints for {name_str}, copying reference colors.")
+            color_next_frame = color_dict
+        else:
+            match = pred["matches0"].cpu().numpy()
+            match_scores = pred["match_scores"].cpu().numpy()
+            color_next_frame = {}
 
-        color_next_frame = {}
         if not accu:
             for i, item in enumerate(match):
                 idx = item + 1 if index == "seg" else index_dict.get(item + 1, 1)

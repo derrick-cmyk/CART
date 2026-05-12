@@ -4,7 +4,7 @@ import os
 from glob import glob
 from skimage import color, io, measure, morphology
 from skimage.measure import label
-from skimage.morphology import binary_dilation, square
+from skimage.morphology import binary_dilation, square, footprint_rectangle
 from tqdm import tqdm
 
 from paint.lineart import LineArt
@@ -126,7 +126,10 @@ class ColorLabel:
             line = np.array(io.imread(line_img_path))
         labeled_img = np.zeros(img.shape[:2], dtype=np.int32)
         color_dict = {}
-        neighborhood = square(3)
+        try:
+            neighborhood = footprint_rectangle((3, 3))
+        except AttributeError:
+            neighborhood = square(3)
         index = 0  # index 0 means the black line.
         if self.colorbook is not None:
             color_list = self.colorbook.all_color_list
