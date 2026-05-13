@@ -6,7 +6,8 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QListWidget, QListWidgetItem, QPushButton, QLabel, QSpinBox,
     QComboBox, QFrame, QSplitter, QAbstractItemView, QListView, QTabWidget, QButtonGroup,
-    QFileDialog, QMessageBox, QTextEdit, QProgressBar, QSlider, QStackedWidget
+    QFileDialog, QMessageBox, QTextEdit, QProgressBar, QSlider, QStackedWidget,
+    QScrollArea, QTabBar
 )
 from PySide6.QtCore import Qt, QSize, Signal, QMimeData, QPoint, QThread, QSettings
 from PySide6.QtGui import QIcon, QPixmap, QColor, QDrag, QBrush, QFont, QPainter, QKeySequence
@@ -60,7 +61,6 @@ class ReorderListWidget(QListWidget):
             mime.setData("application/x-frame-path-list", json.dumps(paths).encode())
             pixmap = QPixmap(THUMB_SIZE, THUMB_SIZE)
             pixmap.fill(QColor(0, 0, 0, 0))
-            # QOL: Nicer badge for multi-selection dragging
             painter = QPainter(pixmap)
             painter.setRenderHint(QPainter.Antialiasing)
             painter.setBrush(QColor(30, 144, 255, 220)) # Dodger Blue
@@ -123,11 +123,10 @@ class ReorderListWidget(QListWidget):
 
         placeholder = QListWidgetItem()
         placeholder.setData(Qt.UserRole, "__placeholder__")
-        placeholder.setFlags(Qt.ItemIsEnabled)                     # enabled, not selectable
-        placeholder.setSizeHint(self.gridSize())                   # full cell size
-        # Light‑blue background + dark‑blue arrow for clarity
-        placeholder.setBackground(QColor(173, 216, 230))          # light blue
-        placeholder.setForeground(QColor(0, 70, 200))             # dark blue arrow
+        placeholder.setFlags(Qt.ItemIsEnabled)
+        placeholder.setSizeHint(self.gridSize())
+        placeholder.setBackground(QColor(173, 216, 230))
+        placeholder.setForeground(QColor(0, 70, 200))
         placeholder.setTextAlignment(Qt.AlignCenter)
         placeholder.setText("▼")
         font = placeholder.font()
@@ -139,12 +138,9 @@ class ReorderListWidget(QListWidget):
         self._placeholder_item = placeholder
         event.acceptProposedAction()
 
-        # ---------- auto‑scroll ----------
         viewport = self.viewport()
         margin = 30
-
         if self.isWrapping():
-            # Vertical auto-scroll for Tile View (Grid)
             scrollbar = self.verticalScrollBar()
             step = max(1, scrollbar.singleStep())
             if pos.y() < margin:
@@ -154,7 +150,6 @@ class ReorderListWidget(QListWidget):
                 new_val = min(scrollbar.maximum(), scrollbar.value() + step)
                 scrollbar.setValue(new_val)
         else:
-            # Horizontal auto-scroll for Player View (Single Row)
             scrollbar = self.horizontalScrollBar()
             step = max(1, scrollbar.singleStep())
             if pos.x() < margin:
@@ -180,7 +175,6 @@ class ReorderListWidget(QListWidget):
     def dropEvent(self, event):
         self._remove_placeholder()
 
-        # Handle multi‑item drop
         if event.mimeData().hasFormat("application/x-frame-path-list"):
             paths = json.loads(bytes(event.mimeData().data("application/x-frame-path-list")).decode())
             rows = []
@@ -226,7 +220,6 @@ class ReorderListWidget(QListWidget):
             self.reordered.emit()
             return
 
-        # Single item drop
         if not event.mimeData().hasFormat("application/x-frame-path"):
             event.ignore()
             return
@@ -321,62 +314,76 @@ class LandingPage(QFrame):
 
 
 # -------------------------------------------------------------------
-#  HelpPage (Detailed User Guide)
+#  HelpPage (single column, scrollable, with shortcuts)
 # -------------------------------------------------------------------
-class HelpPage(QFrame):
-    """A detailed documentation page explaining application usage and settings."""
+class HelpPage(QScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
-        layout = QHBoxLayout(self)
+        self.setObjectName("HelpScrollArea")
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.NoFrame)
+        
+        content = QWidget()
+        content.setObjectName("HelpContent")
+        content.setStyleSheet("background-color: transparent;")   # fix light mode clash
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(40)
+        layout.setSpacing(25)
 
-        # Left Panel: Workflow
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setAlignment(Qt.AlignTop)
-        
-        lbl_flow = QLabel("How to Operate")
-        lbl_flow.setStyleSheet("font-size: 22px; font-weight: bold; margin-bottom: 15px; color: #1e90ff;")
-        left_layout.addWidget(lbl_flow)
-        
-        flow_text = (
-            "1. <b>Add Frames</b>: Use 'Add Images' or 'Folder' to import your B&W line art.<br><br>"
-            "2. <b>Designate References</b>: Find your colored keyframes in the list and <b>check the checkbox</b> "
-            "on their thumbnail. These frames act as the 'Ground Truth' color source.<br><br>"
-            "3. <b>Organize Timeline</b>: Drag and drop frames to ensure they are in chronological order. "
+        def add_section(title):
+            lbl = QLabel(title)
+            lbl.setStyleSheet("font-size: 22px; font-weight: bold; color: #1e90ff;")
+            layout.addWidget(lbl)
+            return lbl
+
+        add_section("How to Operate")
+        howto = QLabel(
+            "1. <b>Add Frames</b>: Use 'Add Images' or 'Add Folder' to import your colored reference frames and uncolored lineart.<br><br>"
+            "2. <b>Designate References</b>: Find your coloured keyframes in the list and <b>check the checkbox</b> "
+            "on their thumbnail. These frames act as the 'Ground Truth' colour source.<br><br>"
+            "3. <b>Organise Timeline</b>: Drag and drop frames to ensure they are in chronological order. "
             "Proper sequence is vital for the AI to track motion accurately.<br><br>"
-            "4. <b>Run</b>: Click 'Run Colorization'. The AI will propagate colors from your references to the inbetweens."
+            "4. <b>Run</b>: Click 'Run Colorization'. The AI will propagate colours from your references to the inbetweens."
         )
-        flow_lbl = QLabel(flow_text)
-        flow_lbl.setWordWrap(True)
-        flow_lbl.setStyleSheet("font-size: 15px; line-height: 1.5;")
-        left_layout.addWidget(flow_lbl)
-        layout.addWidget(left_panel, 1)
+        howto.setWordWrap(True)
+        howto.setStyleSheet("font-size: 15px; line-height: 1.5;")
+        layout.addWidget(howto)
 
-        # Right Panel: Component Guide
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setAlignment(Qt.AlignTop)
-        
-        lbl_comp = QLabel("Colorization Settings Guide")
-        lbl_comp.setStyleSheet("font-size: 22px; font-weight: bold; margin-bottom: 15px; color: #1e90ff;")
-        right_layout.addWidget(lbl_comp)
-        
-        comp_text = (
-            "• <b>Mode</b>: <i>Auto</i> is recommended; it finds the shortest path between references. <i>Forward/Backward</i> forces direction. Nearest applies references directly to all frames.<br>"
-            "• <b>Seg Type</b>: Use <i>Default</i> for clean lines. Use <i>Trappedball</i> for messy or unclosed sketches.<br>"
+        add_section("Colorization Settings Guide")
+        settings_help = QLabel(
+            "• <b>Mode</b>: <i>Auto</i> is recommended; it finds the shortest path between references. "
+            "<i>Forward/Backward</i> forces colorization to propagate in a single direction only. <i>Nearest</i> applies references directly to all frames.<br>"
+            "• <b>Seg Type</b>: Use <i>Default</i> for clean lines. Use <i>Trappedball</i> for messy or unclosed sketches, though it will be a bit slower.<br>"
             "• <b>Line-mask Thr</b>: Controls line art detection. Lower values make the AI more sensitive to light gray strokes.<br>"
             "• <b>Force White Canvas</b>: Essential if using transparent PNGs to prevent black silhouette errors.<br>"
-            "• <b>Treat as Final</b>: Skips line-cleaning. Use if your input frames already have shading or rough colors.<br>"
+            "• <b>Treat as Final</b>: Skips line-cleaning. Use if your input frames already have shading or rough colours.<br>"
             "• <b>RAFT Res</b>: Resolution for motion tracking. 320 is standard; 640+ improves quality for complex movement but is slower.<br>"
-            "• <b>Keep Line</b>: Merges your original high-res linework back onto the AI's color output."
+            "• <b>Keep Line</b>: Merges your original high-res linework back onto the AI's colour output."
         )
-        comp_lbl = QLabel(comp_text)
-        comp_lbl.setWordWrap(True)
-        comp_lbl.setStyleSheet("font-size: 15px; line-height: 1.5;")
-        right_layout.addWidget(comp_lbl)
-        layout.addWidget(right_panel, 1)
+        settings_help.setWordWrap(True)
+        settings_help.setStyleSheet("font-size: 15px; line-height: 1.5;")
+        layout.addWidget(settings_help)
+
+        add_section("Shortcuts")
+        shortcuts = QLabel(
+            "<table cellspacing='8'>"
+            "<tr><td><b>Ctrl + A</b></td><td>Select all frames in the current view</td></tr>"
+            "<tr><td><b>Ctrl + R / Ctrl + Enter</b></td><td>Run colorization</td></tr>"
+            "<tr><td><b>Ctrl + + / =</b></td><td>Zoom in (thumbnail size)</td></tr>"
+            "<tr><td><b>Ctrl + -</b></td><td>Zoom out (thumbnail size)</td></tr>"
+            "<tr><td><b>Delete / Backspace</b></td><td>Remove selected frames</td></tr>"
+            "<tr><td><b>Space / R</b></td><td>Toggle reference state of selected frame(s)</td></tr>"
+            "<tr><td><b>Double‑click</b></td><td>Toggle reference state on a single frame</td></tr>"
+            "<tr><td><b>Drag &amp; Drop</b></td><td>Reorder frames in the timeline</td></tr>"
+            "</table>"
+        )
+        shortcuts.setWordWrap(True)
+        shortcuts.setStyleSheet("font-size: 15px; line-height: 1.5;")
+        layout.addWidget(shortcuts)
+
+        layout.addStretch()
+        self.setWidget(content)
+
 
 # -------------------------------------------------------------------
 #  FrameViewer (Shared component for Timeline and Results)
@@ -384,16 +391,20 @@ class HelpPage(QFrame):
 class FrameViewer(QWidget):
     """A widget that can toggle between a Tile View (grid) and Player View (one-at-a-time)."""
     
-    def __init__(self, is_editable=True, parent=None):
+    def __init__(self, is_editable=True, extra_header_widget=None, parent=None):
         super().__init__(parent)
         self.is_editable = is_editable
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
         header = QHBoxLayout()
+        # Title always leftmost
         self.title_label = QLabel("Frames")
         self.title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
         header.addWidget(self.title_label)
+        # Extra widget (e.g. reverse button) placed right after the title
+        if extra_header_widget is not None:
+            header.addWidget(extra_header_widget)
         header.addStretch()
         
         self.btn_tile_view = QPushButton("Tile View")
@@ -434,7 +445,7 @@ class FrameViewer(QWidget):
         
         self.preview_label = QLabel("No frame selected")
         self.preview_label.setAlignment(Qt.AlignCenter)
-        self._player_bg_color = "#1a1a1a"   # default dark background
+        self._player_bg_color = "#1a1a1a"
         self._update_player_bg()
         
         p_layout.addWidget(self.preview_label, 1)
@@ -454,12 +465,10 @@ class FrameViewer(QWidget):
         self.scrubber.valueChanged.connect(self.list_widget.setCurrentRow)
 
     def set_player_bg_color(self, color):
-        """Update the background colour of the player view preview label."""
         self._player_bg_color = color
         self._update_player_bg()
 
     def _update_player_bg(self):
-        """Apply the stored background colour to the preview label."""
         self.preview_label.setStyleSheet(
             f"background-color: {self._player_bg_color}; border-radius: 10px;"
         )
@@ -470,7 +479,6 @@ class FrameViewer(QWidget):
         self.stack.setCurrentIndex(index)
 
         if index == 1:
-            # Player View: Force horizontal scrolling
             self.list_widget.setFlow(QListView.LeftToRight)
             self.list_widget.setWrapping(False)
             self.list_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -480,7 +488,6 @@ class FrameViewer(QWidget):
             self._sync_preview()
             self.list_widget.setFocus()
         else:
-            # Tile View: Grid layout
             self.list_widget.setFlow(QListView.LeftToRight)
             self.list_widget.setWrapping(True)
             self.list_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -489,9 +496,7 @@ class FrameViewer(QWidget):
             self.stack.widget(0).layout().addWidget(self.list_widget)
 
     def update_list_height(self):
-        """Adjusts the list height when in Player View to match thumbnail size."""
         if self.stack.currentIndex() == 1:
-            # Add padding for text and scrollbar
             self.list_widget.setFixedHeight(THUMB_SIZE + 90)
 
     def _sync_preview(self):
@@ -511,7 +516,7 @@ class InferenceWorker(QThread):
     status_signal = Signal(str)
     progress_start_signal = Signal()
     progress_stop_signal = Signal()
-    finished_signal = Signal(bool, str)          # success, message
+    finished_signal = Signal(bool, str)
     open_output_signal = Signal(str)
 
     def __init__(self, timeline_items, out_dir, mode, seg_type,
@@ -532,7 +537,6 @@ class InferenceWorker(QThread):
         self._stopped = False
 
     def stop(self):
-        """Stops the inference by setting a flag and terminating the subprocess."""
         self._stopped = True
         if self.proc:
             try:
@@ -548,7 +552,6 @@ class InferenceWorker(QThread):
         start_time = time.time()
         
         try:
-            # ── 1. Setup temp clip folder ──
             self.log_signal.emit("[1/4] Setting up temporary clip folder…")
             if self._stopped: return
 
@@ -612,11 +615,9 @@ class InferenceWorker(QThread):
             self.log_signal.emit(f"   Clip ready: {ref_count} GT frame(s), "
                                  f"{len(self.timeline_items) - ref_count} line frame(s) to colorize ({len(self.timeline_items)} total)\n")
 
-            # ── 2. Build command ──
             self.log_signal.emit("[2/4] Building inference command…")
             self.status_signal.emit("Running inference…")
             script = os.path.join(BASE_DIR, "inference_line_frames.py")
-            # Use sys.executable instead of "python" to ensure the bundled environment is used
             cmd = [
                 sys.executable, script,
                 "--path", temp_clip,
@@ -629,11 +630,10 @@ class InferenceWorker(QThread):
                 cmd.append("--keep_line")
             if self.treat_as_final:
                 cmd.append("--treat_as_final")
-            if not self.use_cuda: # If "Use CUDA" is toggled OFF, force CPU usage
+            if not self.use_cuda:
                 cmd.append("--force_cpu")
             self.log_signal.emit(f"   Command:\n   {' '.join(cmd)}\n")
 
-            # ── 3. Run subprocess ──
             self.log_signal.emit("[3/4] Running model – see live output below…\n" + "─" * 60)
             if self._stopped:
                 self.log_signal.emit("🛑 Process stopped by user before launching model.")
@@ -651,7 +651,6 @@ class InferenceWorker(QThread):
             )
 
             friendly_error = None
-            # Map technical regex patterns to user-friendly hints
             error_patterns = {
                 r"torch\.cuda\.OutOfMemoryError": "Graphics Memory (VRAM) is full. Try lower RAFT resolution or CPU mode.",
                 r"CUDA error": "Graphics card error. Ensure your drivers are updated or use CPU mode.",
@@ -663,8 +662,6 @@ class InferenceWorker(QThread):
             for raw_line in iter(self.proc.stdout.readline, ''):
                 stripped = raw_line.rstrip('\n\r')
                 self.log_signal.emit(stripped)
-
-                # Check for known errors to provide human-readable feedback
                 for pattern, hint in error_patterns.items():
                     if re.search(pattern, stripped, re.IGNORECASE):
                         friendly_error = hint
@@ -688,7 +685,6 @@ class InferenceWorker(QThread):
                 self.finished_signal.emit(False, err_msg)
                 return
 
-            # ── 4. Copy results ──
             self.log_signal.emit("\n[4/4] Copying results to output directory…")
             results_src = temp_clip
             keepline_src = os.path.join(temp_workspace, clip_name + "_keepline")
@@ -746,11 +742,10 @@ class InferenceWorker(QThread):
 class ColorizationApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("BasicPBC – Paint Bucket Colorization")
+        self.setWindowTitle("CART-gui")
         self.setWindowIcon(QIcon())
         self.setMinimumSize(1000, 750)
 
-        # Theme state
         self.current_theme = "dark"
         self.show_landing_pref = True
         self.landing_dismissed_manually = False
@@ -761,8 +756,37 @@ class ColorizationApp(QMainWindow):
         main_vbox = QVBoxLayout(central)
         main_vbox.setContentsMargins(10, 10, 10, 10)
 
-        # Toolbar
-        toolbar_layout = QHBoxLayout()
+        # ---- Top bar: tabs + Run/Stop buttons ----
+        top_bar = QHBoxLayout()
+        self.tab_bar = QTabBar()
+        self.tab_bar.addTab("Workspace")
+        self.tab_bar.addTab("Results")
+        self.tab_bar.addTab("Settings")
+        self.tab_bar.addTab("?")
+        top_bar.addWidget(self.tab_bar)
+        top_bar.addStretch()
+        self.btn_run = QPushButton("▶  Run Colorization")
+        self.btn_run.setStyleSheet("QPushButton { background-color: #1e90ff; color: white; }")
+        self.btn_stop = QPushButton("🛑 Stop")
+        self.btn_stop.setEnabled(False)
+        self.btn_stop.setStyleSheet("QPushButton { background-color: #d9534f; color: white; }")
+        top_bar.addWidget(self.btn_run)
+        top_bar.addWidget(self.btn_stop)
+        main_vbox.addLayout(top_bar)
+
+        # ---- Main splitter: left (tab content) | right (settings) ----
+        self.content_splitter = QSplitter(Qt.Horizontal)
+        main_vbox.addWidget(self.content_splitter, 1)
+
+        # Tab content stack
+        self.tab_content_stack = QStackedWidget()
+        self.content_splitter.addWidget(self.tab_content_stack)
+
+        # --- Workspace page ---
+        workspace_tab = QWidget()
+        workspace_layout = QVBoxLayout(workspace_tab)
+
+        ws_btn_layout = QHBoxLayout()
         self.btn_add_frames = QPushButton("➕ Add Images")
         self.btn_add_folder = QPushButton("➕ Add Folder")
         self.btn_remove_selected = QPushButton("🗑 Remove Selected")
@@ -770,36 +794,16 @@ class ColorizationApp(QMainWindow):
         self.btn_move_front = QPushButton("▤ Move to Front")
         self.btn_move_back = QPushButton("▤ Move to Back")
         self.btn_clear_all = QPushButton("🗑 Clear All")
-        self.btn_run = QPushButton("▶  Run Colorization")
-        self.btn_run.setStyleSheet("QPushButton { background-color: #1e90ff; color: white; }")
-        self.btn_stop = QPushButton("🛑 Stop")
-        self.btn_stop.setEnabled(False)
-        self.btn_stop.setStyleSheet("QPushButton { background-color: #d9534f; color: white; }")
-        toolbar_layout.addWidget(self.btn_add_frames)
-        toolbar_layout.addWidget(self.btn_add_folder)
-        toolbar_layout.addWidget(self.btn_remove_selected)
-        toolbar_layout.addWidget(self.btn_reverse_order)
-        toolbar_layout.addWidget(self.btn_move_front)
-        toolbar_layout.addWidget(self.btn_move_back)
-        toolbar_layout.addWidget(self.btn_clear_all)
-        toolbar_layout.addStretch()
-        toolbar_layout.addWidget(self.btn_run)
-        toolbar_layout.addWidget(self.btn_stop)
-        main_vbox.addLayout(toolbar_layout)
+        ws_btn_layout.addWidget(self.btn_add_frames)
+        ws_btn_layout.addWidget(self.btn_add_folder)
+        ws_btn_layout.addWidget(self.btn_remove_selected)
+        ws_btn_layout.addWidget(self.btn_reverse_order)
+        ws_btn_layout.addWidget(self.btn_move_front)
+        ws_btn_layout.addWidget(self.btn_move_back)
+        ws_btn_layout.addWidget(self.btn_clear_all)
+        ws_btn_layout.addStretch()
+        workspace_layout.addLayout(ws_btn_layout)
 
-        # ---------- Tabs ----------
-        # Main Content Splitter: Left (Tabs) | Right (Options)
-        self.content_splitter = QSplitter(Qt.Horizontal)
-        main_vbox.addWidget(self.content_splitter, 1)
-
-        self.tabs = QTabWidget()
-        self.content_splitter.addWidget(self.tabs)
-
-        # --- Workspace tab ---
-        workspace_tab = QWidget()
-        workspace_layout = QVBoxLayout(workspace_tab)
-
-        # Stack: Landing Page vs. Timeline UI
         self.workspace_stack = QStackedWidget()
         workspace_layout.addWidget(self.workspace_stack)
 
@@ -814,26 +818,41 @@ class ColorizationApp(QMainWindow):
         self.timeline_list = self.timeline_viewer.list_widget
         self.workspace_stack.addWidget(self.timeline_viewer)
 
-        # --- Results tab ---
+        self.tab_content_stack.addWidget(workspace_tab)  # index 0
+
+        # --- Results page (redesigned) ---
         self.results_tab = QWidget()
-        self.results_layout = QVBoxLayout(self.results_tab)
-        self.results_viewer = FrameViewer(is_editable=False)
+        results_main_layout = QVBoxLayout(self.results_tab)
+
+        # Reverse button created here, then passed to the viewer's header
+        self.btn_reverse_results = QPushButton("⇅ Reverse Order")
+        self.btn_reverse_results.setEnabled(False)
+        self.btn_reverse_results.clicked.connect(self.reverse_results_order)
+
+        # Stacked widget: placeholder vs actual viewer
+        self.results_stack = QStackedWidget()
+        results_main_layout.addWidget(self.results_stack)
+
+        # Placeholder page
+        placeholder_page = QWidget()
+        placeholder_layout = QVBoxLayout(placeholder_page)
+        placeholder_layout.setAlignment(Qt.AlignCenter)
+        placeholder_layout.addWidget(QLabel("No results to display. Run colorization first."))
+        self.results_stack.addWidget(placeholder_page)
+
+        # Actual results viewer (receives the reverse button as extra header widget)
+        self.results_viewer = FrameViewer(is_editable=False, extra_header_widget=self.btn_reverse_results)
         self.results_viewer.title_label.setText("Colorization Results")
         self.results_list = self.results_viewer.list_widget
-        
-        self.no_results_label = QLabel("No results to display. Run colorization first.")
-        self.no_results_label.setAlignment(Qt.AlignCenter)
-        self.results_layout.addWidget(self.no_results_label)
-        self.results_layout.addWidget(self.results_viewer)
-        self.results_viewer.hide()
+        self.results_stack.addWidget(self.results_viewer)
 
-        # --- Settings tab ---
+        self.tab_content_stack.addWidget(self.results_tab)  # index 1
+
+        # --- Settings page ---
         self.settings_tab = QWidget()
         settings_layout = QVBoxLayout(self.settings_tab)
         settings_layout.setContentsMargins(20, 20, 20, 20)
-        settings_layout.addStretch()
 
-        # Theme selection buttons
         theme_layout = QHBoxLayout()
         theme_layout.addWidget(QLabel("Theme:"))
         self.btn_dark_mode = QPushButton("Dark Mode")
@@ -843,24 +862,21 @@ class ColorizationApp(QMainWindow):
         self.theme_button_group = QButtonGroup(self)
         self.theme_button_group.addButton(self.btn_dark_mode, 0)
         self.theme_button_group.addButton(self.btn_light_mode, 1)
-        self.theme_button_group.setExclusive(True) # Only one can be checked
+        self.theme_button_group.setExclusive(True)
         theme_layout.addWidget(self.btn_dark_mode)
         theme_layout.addWidget(self.btn_light_mode)
         theme_layout.addStretch()
         settings_layout.addLayout(theme_layout)
 
-        # CUDA toggle
         cuda_layout = QHBoxLayout()
         cuda_layout.addWidget(QLabel("CUDA Usage:"))
         self.btn_use_cuda = QPushButton("Use CUDA (if available)")
         self.btn_use_cuda.setCheckable(True)
-        self.btn_use_cuda.setChecked(True) # Default to trying CUDA
-        self.btn_use_cuda.setStyleSheet("QPushButton:checked { background-color: #1e90ff; }")
+        self.btn_use_cuda.setChecked(True)
         cuda_layout.addWidget(self.btn_use_cuda)
         cuda_layout.addStretch()
         settings_layout.addLayout(cuda_layout)
 
-        # Landing page toggle
         landing_layout = QHBoxLayout()
         landing_layout.addWidget(QLabel("Show introduction when empty:"))
         self.btn_toggle_landing = QPushButton("Enabled")
@@ -872,21 +888,27 @@ class ColorizationApp(QMainWindow):
         landing_layout.addStretch()
         settings_layout.addLayout(landing_layout)
 
-        settings_layout.addSpacing(20)
-
-        # Reset button
+        # Reset button – right aligned and smaller, dark orange
+        reset_layout = QHBoxLayout()
+        reset_layout.addStretch()
         self.btn_reset_defaults = QPushButton("🔄 Reset to Standard Settings")
-        self.btn_reset_defaults.setStyleSheet("QPushButton { background-color: #f0ad4e; color: white; }")
-        settings_layout.addWidget(self.btn_reset_defaults)
+        self.btn_reset_defaults.setMaximumWidth(220)
+        self.btn_reset_defaults.setStyleSheet(
+            "QPushButton { background-color: #d35400; color: white; padding: 6px 12px; }"
+            "QPushButton:hover { background-color: #ba4a00; }"
+        )
+        reset_layout.addWidget(self.btn_reset_defaults)
+        settings_layout.addLayout(reset_layout)
         settings_layout.addStretch()
+        self.tab_content_stack.addWidget(self.settings_tab)  # index 2
 
-        # --- Help Tab ---
+        # --- Help page ---
         self.help_page = HelpPage()
+        self.tab_content_stack.addWidget(self.help_page)  # index 3
 
-        self.tabs.addTab(workspace_tab, "Workspace")
-        self.tabs.addTab(self.results_tab, "Results")
-        self.tabs.addTab(self.settings_tab, "Settings")
-        self.tabs.addTab(self.help_page, "?")
+        # Synchronize tab bar with content stack
+        self.tab_bar.currentChanged.connect(self.tab_content_stack.setCurrentIndex)
+        self.tab_bar.currentChanged.connect(self._on_tab_changed)
 
         # ----- Right panel (options + console) -----
         self.right_frame = QFrame()
@@ -986,44 +1008,34 @@ class ColorizationApp(QMainWindow):
         btn_browse.clicked.connect(self.browse_output)
         self.btn_reset_defaults.clicked.connect(self.reset_to_defaults)
 
-        # Keyboard/Mouse QOL connections
         self.timeline_list.delete_pressed.connect(self.remove_selected_frames)
         self.timeline_list.toggle_reference_requested.connect(self.toggle_selected_references)
         self.timeline_list.itemDoubleClicked.connect(self._on_item_double_clicked)
 
-        # Connect theme buttons
         self.btn_dark_mode.clicked.connect(lambda: self.change_theme("dark"))
         self.btn_light_mode.clicked.connect(lambda: self.change_theme("light"))
         self.timeline_list.reordered.connect(self._update_timeline_display)
         self.timeline_list.itemChanged.connect(self._on_item_changed)
-        self.tabs.currentChanged.connect(self._on_tab_changed)
-        self.btn_dark_mode.setChecked(True) # Default to dark mode
-
-        # Connect "Force White Canvas" toggle to update player view background
+        self.btn_dark_mode.setChecked(True)
         self.white_bg_check.toggled.connect(self._on_force_white_bg_toggled)
 
         self.load_settings()
-
-        # Apply initial theme
         self.apply_theme(self.current_theme)
 
     def _on_force_white_bg_toggled(self, checked):
-        """Change the player view preview background to white when 'Force White Canvas' is on."""
         color = "#FFFFFF" if checked else "#1a1a1a"
         self.timeline_viewer.set_player_bg_color(color)
         self.results_viewer.set_player_bg_color(color)
 
     def _on_tab_changed(self, index):
-        # Show right panel only for Workspace (0) and Help (3)
         self.right_frame.setVisible(index == 0 or index == 3)
 
-    # ---------- Theme management ----------
     def change_theme(self, text):
         theme = text.lower()
         if theme != self.current_theme:
             self.current_theme = theme
-            self.btn_dark_mode.setChecked(theme == "dark") # Set checked state
-            self.btn_light_mode.setChecked(theme == "light") # Set checked state
+            self.btn_dark_mode.setChecked(theme == "dark")
+            self.btn_light_mode.setChecked(theme == "light")
             self.apply_theme(theme)
     
     def apply_theme(self, theme):
@@ -1041,7 +1053,7 @@ class ColorizationApp(QMainWindow):
                 QPushButton:checked { background-color: #1e90ff; color: white; }
                 QComboBox, QLineEdit, QTextEdit, QProgressBar, QSpinBox {
                     background-color: #3a3a3a;
-                    selection-background-color: #1e90ff; /* For selected text */
+                    selection-background-color: #1e90ff;
                     border: 1px solid #555;
                     border-radius: 4px;
                     padding: 5px;
@@ -1059,9 +1071,32 @@ class ColorizationApp(QMainWindow):
                     background-color: #333333;
                     border: none;
                 }
-                QTabWidget::pane { border: 1px solid #555; }
-                QTabBar::tab { background: #3a3a3a; color: #ccc; padding: 10px 20px; border-top-left-radius: 4px; border-top-right-radius: 4px; }
-                QTabBar::tab:selected { background: #2d2d2d; color: white; border-bottom-color: #1e90ff; border-bottom: 2px solid #1e90ff; }
+                QTabBar {
+                    background-color: transparent;
+                    margin-top: 4px;
+                }
+                QTabBar::tab {
+                    background: #3a3a3a;
+                    color: #ccc;
+                    padding: 8px 18px;
+                    margin-right: 3px;
+                    border-top-left-radius: 6px;
+                    border-top-right-radius: 6px;
+                }
+                QTabBar::tab:selected {
+                    background: #2d2d2d;
+                    color: white;
+                    border-bottom: 2px solid #1e90ff;
+                }
+                QTabBar::tab:!selected:hover {
+                    background: #4a4a4a;
+                }
+                QScrollArea {
+                    background-color: #2b2b2b;
+                }
+                QScrollArea > QWidget {
+                    background-color: #2b2b2b;
+                }
                 QListWidget::item {
                     border-radius: 8px; margin: 4px; padding: 4px;
                     color: white;
@@ -1095,7 +1130,7 @@ class ColorizationApp(QMainWindow):
                 }
                 #LandingPage QPushButton:hover { background-color: #555; }
             """)
-        else:  # light theme
+        else:
             self.setStyleSheet("""
                 QMainWindow { background-color: #f0f0f0; }
                 QLabel { color: #333333; }
@@ -1109,7 +1144,7 @@ class ColorizationApp(QMainWindow):
                 QPushButton:checked { background-color: #1e90ff; color: white; }
                 QComboBox, QLineEdit, QTextEdit, QProgressBar, QSpinBox {
                     background-color: white;
-                    selection-background-color: #1e90ff; /* For selected text */
+                    selection-background-color: #1e90ff;
                     border: 1px solid #aaa;
                     border-radius: 4px;
                     padding: 5px;
@@ -1127,9 +1162,32 @@ class ColorizationApp(QMainWindow):
                     background-color: white;
                     border: none;
                 }
-                QTabWidget::pane { border: 1px solid #aaa; }
-                QTabBar::tab { background: #e0e0e0; color: #333; padding: 10px 20px; border-top-left-radius: 4px; border-top-right-radius: 4px; }
-                QTabBar::tab:selected { background: #f0f0f0; color: black; border-bottom-color: #1e90ff; border-bottom: 2px solid #1e90ff; }
+                QTabBar {
+                    background-color: transparent;
+                    margin-top: 4px;
+                }
+                QTabBar::tab {
+                    background: #e0e0e0;
+                    color: #333;
+                    padding: 8px 18px;
+                    margin-right: 3px;
+                    border-top-left-radius: 6px;
+                    border-top-right-radius: 6px;
+                }
+                QTabBar::tab:selected {
+                    background: #ffffff;
+                    color: black;
+                    border-bottom: 2px solid #1e90ff;
+                }
+                QTabBar::tab:!selected:hover {
+                    background: #d0d0d0;
+                }
+                QScrollArea {
+                    background-color: #f0f0f0;
+                }
+                QScrollArea > QWidget {
+                    background-color: #f0f0f0;
+                }
                 QListWidget::item {
                     border-radius: 8px; margin: 4px; padding: 4px;
                     color: black;
@@ -1163,15 +1221,14 @@ class ColorizationApp(QMainWindow):
                 }
                 #LandingPage QPushButton:hover { background-color: #ccc; }
             """)
-
-        # The `btn_run` and `btn_stop` have inline styles, but they will be overridden by global QPushButton style.
-        # Reapply their specific styles to ensure they stand out.
         self.btn_run.setStyleSheet("QPushButton { background-color: #1e90ff; color: white; }")
         self.btn_stop.setStyleSheet("QPushButton { background-color: #d9534f; color: white; }")
-        self.btn_reset_defaults.setStyleSheet("QPushButton { background-color: #f0ad4e; color: white; }")
+        # Keep the reset button dark orange in any theme
+        self.btn_reset_defaults.setStyleSheet(
+            "QPushButton { background-color: #d35400; color: white; padding: 6px 12px; }"
+            "QPushButton:hover { background-color: #ba4a00; }"
+        )
         self.btn_use_cuda.setStyleSheet("QPushButton:checked { background-color: #1e90ff; }")
-
-        # Re-apply the player view background in case it was overridden by global style
         self.timeline_viewer._update_player_bg()
         self.results_viewer._update_player_bg()
 
@@ -1193,20 +1250,18 @@ class ColorizationApp(QMainWindow):
         else:
             self.workspace_stack.setCurrentIndex(1)
 
-    # ---------- Zoom (Ctrl + / Ctrl -) ----------
     def keyPressEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
             if event.key() == Qt.Key_A:
-                if self.tabs.currentIndex() == 0:
+                if self.tab_content_stack.currentIndex() == 0:
                     self.timeline_list.selectAll()
-                elif self.tabs.currentIndex() == 1:
+                elif self.tab_content_stack.currentIndex() == 1:
                     self.results_list.selectAll()
                 return
             elif event.key() == Qt.Key_R or event.key() == Qt.Key_Return:
                 if self.btn_run.isEnabled():
                     self.run_colorization()
                 return
-
             if event.key() == Qt.Key_Plus or event.key() == Qt.Key_Equal:
                 self.zoom_in()
                 return
@@ -1230,7 +1285,6 @@ class ColorizationApp(QMainWindow):
     def update_thumbnail_size(self):
         global THUMB_SIZE
         THUMB_SIZE = self.thumb_size
-        # Update timeline and results lists
         for viewer in [self.timeline_viewer, self.results_viewer]:
             lst = viewer.list_widget
             lst.setIconSize(QSize(THUMB_SIZE, THUMB_SIZE))
@@ -1244,9 +1298,7 @@ class ColorizationApp(QMainWindow):
                                                Qt.KeepAspectRatio, Qt.SmoothTransformation)
                     item.setIcon(QIcon(pix))
                     item.setSizeHint(QSize(THUMB_SIZE + 24, THUMB_SIZE + 60))
-        # Also update the placeholder's size hint in dragMoveEvent uses self.gridSize() which will be correct.
 
-    # ---------- Image list management ----------
     def _add_single_image_to_list(self, file_path):
         pix = QPixmap(file_path).scaled(self.thumb_size, self.thumb_size,
                                         Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -1273,15 +1325,13 @@ class ColorizationApp(QMainWindow):
     def toggle_selected_references(self):
         selected = self.timeline_list.selectedItems()
         if not selected: return
-        # If any are unchecked, check them all. Otherwise uncheck all.
         any_unchecked = any(it.checkState() == Qt.Unchecked for it in selected)
         new_state = Qt.Checked if any_unchecked else Qt.Unchecked
         for it in selected:
             it.setCheckState(new_state)
 
     def _on_item_double_clicked(self, item):
-        # Only toggle if it's the timeline workspace
-        if self.tabs.currentIndex() == 0:
+        if self.tab_content_stack.currentIndex() == 0:
             new_state = Qt.Checked if item.checkState() == Qt.Unchecked else Qt.Unchecked
             item.setCheckState(new_state)
 
@@ -1432,7 +1482,7 @@ class ColorizationApp(QMainWindow):
             self.thr_spin.value(),
             self.white_bg_check.isChecked(),
             self.final_line_check.isChecked(),
-            self.btn_use_cuda.isChecked(), # Pass CUDA preference
+            self.btn_use_cuda.isChecked(),
         )
         self.worker.log_signal.connect(self.console.append)
         self.worker.status_signal.connect(self.status_label.setText)
@@ -1459,8 +1509,8 @@ class ColorizationApp(QMainWindow):
                 QMessageBox.warning(self, "Error", message)
 
     def populate_results(self, path):
-        self.no_results_label.hide()
-        self.results_viewer.show()
+        self.btn_reverse_results.setEnabled(True)
+        self.results_stack.setCurrentIndex(1)
         self.results_list.clear()
         files = [os.path.join(path, f) for f in os.listdir(path) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
         files.sort()
@@ -1470,7 +1520,17 @@ class ColorizationApp(QMainWindow):
             item.setData(Qt.UserRole, f)
             item.setSizeHint(QSize(self.thumb_size + 24, self.thumb_size + 60))
             self.results_list.addItem(item)
-        self.tabs.setCurrentIndex(1)
+        self.tab_bar.setCurrentIndex(1)
+
+    def reverse_results_order(self):
+        count = self.results_list.count()
+        if count <= 1:
+            return
+        items = []
+        for _ in range(count):
+            items.append(self.results_list.takeItem(0))
+        for item in reversed(items):
+            self.results_list.addItem(item)
 
     def open_output_folder(self, path):
         self.populate_results(path)
@@ -1481,6 +1541,13 @@ class ColorizationApp(QMainWindow):
         msg_box.setIcon(QMessageBox.Information)
         open_button = msg_box.addButton("Open Output Folder", QMessageBox.ActionRole)
         ok_button = msg_box.addButton(QMessageBox.Ok)
+
+        # Apply theme-aware stylesheet to the message box so text is readable
+        if self.current_theme == "dark":
+            msg_box.setStyleSheet("QMessageBox { background-color: #2b2b2b; color: #cccccc; } QLabel { color: #cccccc; } QPushButton { background-color: #3a3a3a; color: white; } QPushButton:hover { background-color: #4a4a4a; }")
+        else:
+            msg_box.setStyleSheet("QMessageBox { background-color: #f0f0f0; color: #333333; } QLabel { color: #333333; } QPushButton { background-color: #e0e0e0; color: black; } QPushButton:hover { background-color: #d0d0d0; }")
+
         msg_box.exec()
         if msg_box.clickedButton() == open_button:
             if sys.platform == "win32":
@@ -1541,7 +1608,6 @@ class ColorizationApp(QMainWindow):
         if self.thumb_size != THUMB_SIZE:
             self.update_thumbnail_size()
 
-        # Restore view modes
         self.timeline_viewer.set_view_mode(int(settings.value("ws_view_mode", 0)))
         self.results_viewer.set_view_mode(int(settings.value("res_view_mode", 0)))
 
@@ -1549,16 +1615,13 @@ class ColorizationApp(QMainWindow):
         if geom:
             self.restoreGeometry(geom)
 
-        # Apply the initial player view background according to the loaded setting
         self._on_force_white_bg_toggled(self.white_bg_check.isChecked())
 
     def reset_to_defaults(self):
-        """Restores the UI settings to their standard default values."""
         reply = QMessageBox.question(self, 'Reset Settings',
                                      "Are you sure you want to reset all colorization options and preferences to their standard values?",
                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
-            # Reset colorization options (right panel)
             self.mode_combo.setCurrentText("auto")
             self.seg_combo.setCurrentText("default")
             self.thr_spin.setValue(50)
@@ -1567,30 +1630,19 @@ class ColorizationApp(QMainWindow):
             self.keepline_check.setChecked(False)
             self.raft_edit.setCurrentText("320")
             self.out_entry.setCurrentText("")
-            
-            # Reset UI preferences
             self.btn_use_cuda.setChecked(True)
             self.btn_toggle_landing.setChecked(True)
             self.change_theme("dark")
-            
-            # Reset thumbnail size
             self.thumb_size = 100
             self.update_thumbnail_size()
             self.status_label.setText("Settings reset to defaults.")
-            
-            # Player view background will be updated automatically by the toggle signal
 
 
 if __name__ == "__main__":
-    # Necessary for PyInstaller bundles using multiprocessing or subprocess re-entry on Windows
     multiprocessing.freeze_support()
-
-    # Check if the EXE is being called to run a bundled script (like inference_line_frames.py)
     if len(sys.argv) > 1 and sys.argv[1].endswith("inference_line_frames.py"):
         script_path = sys.argv[1]
-        # Remove the script path from argv so the script's argparse sees the correct flags
         sys.argv.pop(1)
-        # Ensure the bundled modules can be found in the temporary extraction directory
         script_dir = os.path.dirname(script_path)
         if script_dir not in sys.path:
             sys.path.insert(0, script_dir)
