@@ -1,4 +1,4 @@
-import sys, os, shutil, tempfile, subprocess, re, threading, traceback, json, runpy, multiprocessing
+import sys, os, shutil, tempfile, subprocess, re, threading, traceback, json, runpy, multiprocessing, time
 import numpy as np
 from PIL import Image
 
@@ -321,6 +321,64 @@ class LandingPage(QFrame):
 
 
 # -------------------------------------------------------------------
+#  HelpPage (Detailed User Guide)
+# -------------------------------------------------------------------
+class HelpPage(QFrame):
+    """A detailed documentation page explaining application usage and settings."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(40)
+
+        # Left Panel: Workflow
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setAlignment(Qt.AlignTop)
+        
+        lbl_flow = QLabel("How to Operate")
+        lbl_flow.setStyleSheet("font-size: 22px; font-weight: bold; margin-bottom: 15px; color: #1e90ff;")
+        left_layout.addWidget(lbl_flow)
+        
+        flow_text = (
+            "1. <b>Add Frames</b>: Use 'Add Images' or 'Folder' to import your B&W line art.<br><br>"
+            "2. <b>Designate References</b>: Find your colored keyframes in the list and <b>check the checkbox</b> "
+            "on their thumbnail. These frames act as the 'Ground Truth' color source.<br><br>"
+            "3. <b>Organize Timeline</b>: Drag and drop frames to ensure they are in chronological order. "
+            "Proper sequence is vital for the AI to track motion accurately.<br><br>"
+            "4. <b>Run</b>: Click 'Run Colorization'. The AI will propagate colors from your references to the inbetweens."
+        )
+        flow_lbl = QLabel(flow_text)
+        flow_lbl.setWordWrap(True)
+        flow_lbl.setStyleSheet("font-size: 15px; line-height: 1.5;")
+        left_layout.addWidget(flow_lbl)
+        layout.addWidget(left_panel, 1)
+
+        # Right Panel: Component Guide
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setAlignment(Qt.AlignTop)
+        
+        lbl_comp = QLabel("Colorization Settings Guide")
+        lbl_comp.setStyleSheet("font-size: 22px; font-weight: bold; margin-bottom: 15px; color: #1e90ff;")
+        right_layout.addWidget(lbl_comp)
+        
+        comp_text = (
+            "• <b>Mode</b>: <i>Auto</i> is recommended; it finds the shortest path between references. <i>Forward/Backward</i> forces direction. Nearest applies references directly to all frames.<br>"
+            "• <b>Seg Type</b>: Use <i>Default</i> for clean lines. Use <i>Trappedball</i> for messy or unclosed sketches.<br>"
+            "• <b>Line-mask Thr</b>: Controls line art detection. Lower values make the AI more sensitive to light gray strokes.<br>"
+            "• <b>Force White Canvas</b>: Essential if using transparent PNGs to prevent black silhouette errors.<br>"
+            "• <b>Treat as Final</b>: Skips line-cleaning. Use if your input frames already have shading or rough colors.<br>"
+            "• <b>RAFT Res</b>: Resolution for motion tracking. 320 is standard; 640+ improves quality for complex movement but is slower.<br>"
+            "• <b>Keep Line</b>: Merges your original high-res linework back onto the AI's color output."
+        )
+        comp_lbl = QLabel(comp_text)
+        comp_lbl.setWordWrap(True)
+        comp_lbl.setStyleSheet("font-size: 15px; line-height: 1.5;")
+        right_layout.addWidget(comp_lbl)
+        layout.addWidget(right_panel, 1)
+
+# -------------------------------------------------------------------
 #  FrameViewer (Shared component for Timeline and Results)
 # -------------------------------------------------------------------
 class FrameViewer(QWidget):
@@ -376,7 +434,9 @@ class FrameViewer(QWidget):
         
         self.preview_label = QLabel("No frame selected")
         self.preview_label.setAlignment(Qt.AlignCenter)
-        self.preview_label.setStyleSheet("background-color: #1a1a1a; border-radius: 10px;")
+        self._player_bg_color = "#1a1a1a"   # default dark background
+        self._update_player_bg()
+        
         p_layout.addWidget(self.preview_label, 1)
 
         self.scrubber = QSlider(Qt.Horizontal)
@@ -392,6 +452,17 @@ class FrameViewer(QWidget):
         self.btn_player_view.clicked.connect(lambda: self.set_view_mode(1))
         self.list_widget.currentRowChanged.connect(self._sync_preview)
         self.scrubber.valueChanged.connect(self.list_widget.setCurrentRow)
+
+    def set_player_bg_color(self, color):
+        """Update the background colour of the player view preview label."""
+        self._player_bg_color = color
+        self._update_player_bg()
+
+    def _update_player_bg(self):
+        """Apply the stored background colour to the preview label."""
+        self.preview_label.setStyleSheet(
+            f"background-color: {self._player_bg_color}; border-radius: 10px;"
+        )
 
     def set_view_mode(self, index):
         self.btn_tile_view.setChecked(index == 0)
@@ -474,6 +545,7 @@ class InferenceWorker(QThread):
         temp_workspace = os.path.join(BASE_DIR, "_gui_workspace")
         clip_name = "temp_clip"
         temp_clip = os.path.join(temp_workspace, clip_name)
+        start_time = time.time()
         
         try:
             # ── 1. Setup temp clip folder ──
@@ -643,7 +715,13 @@ class InferenceWorker(QThread):
                         self.log_signal.emit(f"   → keepline/{fname}")
                         copied += 1
 
-            self.log_signal.emit(f"\n✔  Done! {copied} result image(s) saved to:\n   {self.out_dir}")
+            end_time = time.time()
+            total_sec = end_time - start_time
+            avg_sec = total_sec / len(self.timeline_items) if self.timeline_items else 0
+
+            self.log_signal.emit(f"\n⏱  Performance Metrics:")
+            self.log_signal.emit(f"   Total Time: {total_sec:.2f}s | Avg: {avg_sec:.2f}s per frame")
+            self.log_signal.emit(f"✔  Done! {copied} result image(s) saved to:\n   {self.out_dir}")
             self.status_signal.emit(f"Complete – {copied} images saved.")
             self.finished_signal.emit(True, "")
             self.open_output_signal.emit(self.out_dir)
@@ -710,20 +788,20 @@ class ColorizationApp(QMainWindow):
         main_vbox.addLayout(toolbar_layout)
 
         # ---------- Tabs ----------
+        # Main Content Splitter: Left (Tabs) | Right (Options)
+        self.content_splitter = QSplitter(Qt.Horizontal)
+        main_vbox.addWidget(self.content_splitter, 1)
+
         self.tabs = QTabWidget()
-        main_vbox.addWidget(self.tabs, 1)
+        self.content_splitter.addWidget(self.tabs)
 
         # --- Workspace tab ---
         workspace_tab = QWidget()
         workspace_layout = QVBoxLayout(workspace_tab)
 
-        # Workspace Splitter: Left (Timeline/Landing) | Right (Options)
-        self.workspace_splitter = QSplitter(Qt.Horizontal)
-        workspace_layout.addWidget(self.workspace_splitter)
-
-        # Left Stack: Landing Page vs. Timeline UI
+        # Stack: Landing Page vs. Timeline UI
         self.workspace_stack = QStackedWidget()
-        self.workspace_splitter.addWidget(self.workspace_stack)
+        workspace_layout.addWidget(self.workspace_stack)
 
         self.landing_page = LandingPage()
         self.landing_page.clicked.connect(self.dismiss_landing_page)
@@ -800,17 +878,20 @@ class ColorizationApp(QMainWindow):
         self.btn_reset_defaults = QPushButton("🔄 Reset to Standard Settings")
         self.btn_reset_defaults.setStyleSheet("QPushButton { background-color: #f0ad4e; color: white; }")
         settings_layout.addWidget(self.btn_reset_defaults)
-
         settings_layout.addStretch()
+
+        # --- Help Tab ---
+        self.help_page = HelpPage()
 
         self.tabs.addTab(workspace_tab, "Workspace")
         self.tabs.addTab(self.results_tab, "Results")
         self.tabs.addTab(self.settings_tab, "Settings")
+        self.tabs.addTab(self.help_page, "?")
 
         # ----- Right panel (options + console) -----
-        right_frame = QFrame()
-        right_frame.setFrameShape(QFrame.StyledPanel)
-        right_layout = QVBoxLayout(right_frame)
+        self.right_frame = QFrame()
+        self.right_frame.setFrameShape(QFrame.StyledPanel)
+        right_layout = QVBoxLayout(self.right_frame)
         right_layout.setContentsMargins(20, 20, 20, 20)
 
         opt_group = QWidget()
@@ -889,8 +970,8 @@ class ColorizationApp(QMainWindow):
         self.console.setStyleSheet("background-color: #1e1e1e; color: #dcdcdc;")
         right_layout.addWidget(self.console)
 
-        self.workspace_splitter.addWidget(right_frame)
-        self.workspace_splitter.setSizes([650, 400])
+        self.content_splitter.addWidget(self.right_frame)
+        self.content_splitter.setSizes([650, 400])
 
         # Connections
         self.btn_add_frames.clicked.connect(self.add_image_files)
@@ -915,11 +996,26 @@ class ColorizationApp(QMainWindow):
         self.btn_light_mode.clicked.connect(lambda: self.change_theme("light"))
         self.timeline_list.reordered.connect(self._update_timeline_display)
         self.timeline_list.itemChanged.connect(self._on_item_changed)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
         self.btn_dark_mode.setChecked(True) # Default to dark mode
+
+        # Connect "Force White Canvas" toggle to update player view background
+        self.white_bg_check.toggled.connect(self._on_force_white_bg_toggled)
+
         self.load_settings()
 
         # Apply initial theme
         self.apply_theme(self.current_theme)
+
+    def _on_force_white_bg_toggled(self, checked):
+        """Change the player view preview background to white when 'Force White Canvas' is on."""
+        color = "#FFFFFF" if checked else "#1a1a1a"
+        self.timeline_viewer.set_player_bg_color(color)
+        self.results_viewer.set_player_bg_color(color)
+
+    def _on_tab_changed(self, index):
+        # Show right panel only for Workspace (0) and Help (3)
+        self.right_frame.setVisible(index == 0 or index == 3)
 
     # ---------- Theme management ----------
     def change_theme(self, text):
@@ -1074,6 +1170,10 @@ class ColorizationApp(QMainWindow):
         self.btn_stop.setStyleSheet("QPushButton { background-color: #d9534f; color: white; }")
         self.btn_reset_defaults.setStyleSheet("QPushButton { background-color: #f0ad4e; color: white; }")
         self.btn_use_cuda.setStyleSheet("QPushButton:checked { background-color: #1e90ff; }")
+
+        # Re-apply the player view background in case it was overridden by global style
+        self.timeline_viewer._update_player_bg()
+        self.results_viewer._update_player_bg()
 
     def dismiss_landing_page(self):
         self.landing_dismissed_manually = True
@@ -1449,6 +1549,9 @@ class ColorizationApp(QMainWindow):
         if geom:
             self.restoreGeometry(geom)
 
+        # Apply the initial player view background according to the loaded setting
+        self._on_force_white_bg_toggled(self.white_bg_check.isChecked())
+
     def reset_to_defaults(self):
         """Restores the UI settings to their standard default values."""
         reply = QMessageBox.question(self, 'Reset Settings',
@@ -1474,6 +1577,8 @@ class ColorizationApp(QMainWindow):
             self.thumb_size = 100
             self.update_thumbnail_size()
             self.status_label.setText("Settings reset to defaults.")
+            
+            # Player view background will be updated automatically by the toggle signal
 
 
 if __name__ == "__main__":
