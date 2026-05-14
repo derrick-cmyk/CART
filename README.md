@@ -7,7 +7,7 @@ Welcome to **CART**, an ethical, artist-centered AI tool designed to automate th
 ## 1. Installation & Preparation
 
 ### System Requirements
-*   **OS:** Windows 10/11, macOS, or Linux.
+*   **OS:** Windows 10/11
 *   **Python:** Version 3.8 or higher is recommended.
 *   **Hardware:** 
     *   **Minimum:** 8GB RAM, Intel Core i5 (or equivalent).
@@ -43,7 +43,7 @@ Welcome to **CART**, an ethical, artist-centered AI tool designed to automate th
 
 To launch the Graphical User Interface, run:
 ```bash
-python gui2.py
+python CART_GUI.py
 ```
 
 ---
@@ -96,16 +96,8 @@ Use these shortcuts to speed up your animation pipeline:
 ## 6. Settings & Diagnostics
 
 *   **Enable CUDA Acceleration:** When toggled ON, CART will use your GPU. If the software is running slow (15s+ per frame), ensure this is active and your drivers are updated.
-*   **Theme Selection:** Toggle between 🌙 **Dark Mode** and ☀️ **Light Mode**.
+*   **Theme Selection:** Toggle between  **Dark Mode** and  **Light Mode**.
 *   **Diagnostic Banner:** When you run the model, check the console for the `--> Execution Device` message. It will confirm if you are running on **GPU (CUDA)** or **CPU**.
-
----
-
-## 7. Troubleshooting
-
-*   **UnicodeEncodeError:** If the console crashes on "stars" (★), ensure your system locale supports UTF-8 or check for the latest patch that replaces special characters.
-*   **Out of Memory (OOM):** If your GPU memory fills up, lower the **RAFT Res** to `160` or toggle OFF CUDA to use CPU mode.
-*   **RuntimeError (Size Mismatch):** This usually means a frame was resized and not scaled back. Ensure you are using the latest version of `basicpbc_arch.py`.
 
 ---
 *CART is an open-source project dedicated to empowering the animation community. Please respect the intellectual property of fellow artists.*
