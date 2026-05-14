@@ -23,13 +23,7 @@ Welcome to **CART**, an ethical, artist-centered AI tool designed to automate th
     pip install -r requirements.txt
     ```
 
-3. **Install BasicPBC Package:**
-    This step is essential for the system to recognize the internal modules (`basicsr`). Run this in the root directory:
-    ```bash
-    python setup.py develop
-    ```
-
-4. **Install PyTorch (CUDA vs CPU):**
+3.  **Install PyTorch (CUDA vs CPU):**
     *   **For GPU Acceleration (NVIDIA only):**
         Check your CUDA version (`nvcc --version`) and install the matching build:
         ```bash
@@ -40,13 +34,8 @@ Welcome to **CART**, an ethical, artist-centered AI tool designed to automate th
         pip install torch torchvision torchaudio
         ```
 
-5. **Download Pre-trained Models:**
-    Place your model checkpoints into the `ckpt/` folder. Recommended files include:
-    *   `basicpbc_pbch.pth` (Standard model)
-    *   `basicpbc_light.pth` (Lightweight model for low VRAM)
-    *   `basicpbc_ref.pth` (Keyframe/Reference-based model)
-    
-    Ensure the RAFT weights are located at `raft/ckpt/raft-animerun-v2-ft_again.pth`.
+4.  **Download Pre-trained Models:**
+    Place your model checkpoints (e.g., `basicpbc_pbch.pth`) into the `ckpt/` folder. Ensure the RAFT weights are located at `raft/ckpt/raft-animerun-v2-ft_again.pth`.
 
 ---
 
@@ -116,7 +105,6 @@ Use these shortcuts to speed up your animation pipeline:
 
 *   **UnicodeEncodeError:** If the console crashes on "stars" (★), ensure your system locale supports UTF-8 or check for the latest patch that replaces special characters.
 *   **Out of Memory (OOM):** If your GPU memory fills up, lower the **RAFT Res** to `160` or toggle OFF CUDA to use CPU mode.
-*   **ModuleNotFoundError (basicsr):** This usually happens if Step 3 of the installation (**Install BasicPBC Package**) was skipped.
 *   **RuntimeError (Size Mismatch):** This usually means a frame was resized and not scaled back. Ensure you are using the latest version of `basicpbc_arch.py`.
 
 ---

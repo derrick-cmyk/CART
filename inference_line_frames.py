@@ -22,7 +22,7 @@ def extract_seg_from_color(color_img_path, line_path, seg_save_path):
     color_label.extract_label_map(color_img_path, seg_save_path, line_path, extract_seg=True)
 
 
-def extract_seg_from_line(line_path, seg_save_path, save_color_seg=False, color_save_path=None, line_thr=50, treat_as_final=False):
+def extract_seg_from_line(line_path, seg_save_path, save_color_seg=False, color_save_path=None, line_thr=50, treat_as_final=False, device='cpu'):
     try:
         # Attempt to use the newer signature with thresholding support
         lineart = LineArt(read_line_2_np(line_path, line_thr=line_thr, treat_as_final=treat_as_final))
@@ -34,7 +34,7 @@ def extract_seg_from_line(line_path, seg_save_path, save_color_seg=False, color_
     seg = np_2_labelpng(seg_np)
     io.imsave(seg_save_path, seg, check_contrast=False)
     if save_color_seg:
-        color_seg = recolorize_seg(torch.from_numpy(seg_np)[None])
+        color_seg = recolorize_seg(torch.from_numpy(seg_np)[None].to(device))
         save_image(color_seg, color_save_path)
 
 
@@ -52,8 +52,12 @@ def extract_color_dict(gt_path, seg_path):
     dump_json(color_dict, save_path)
 
 
-def generate_seg(path, seg_type="default", radius=4, save_color_seg=False, multi_clip=False, line_thr=50, treat_as_final=False):
+def generate_seg(path, seg_type="default", radius=4, save_color_seg=False, multi_clip=False, line_thr=50, treat_as_final=False, device='cpu'):
     if seg_type == "trappedball":
+        print("\n" + "-" * 60)
+        print(" INFO: Using Trappedball segmentation. This phase is CPU-only and")
+        print("       can be slow for large sequences or high resolutions.")
+        print("-" * 60 + "\n")
         save_color_seg = True
 
     if not multi_clip:
@@ -88,7 +92,7 @@ def generate_seg(path, seg_type="default", radius=4, save_color_seg=False, multi
 
             is_gt = name in gt_names
             if seg_type == "default":
-                extract_seg_from_line(line_path, seg_path, save_color_seg, seg_color_path, line_thr, treat_as_final and not is_gt)
+                extract_seg_from_line(line_path, seg_path, save_color_seg, seg_color_path, line_thr, treat_as_final and not is_gt, device=device)
             elif seg_type == "trappedball":
                 trappedball_fill(line_path, seg_color_path, radius, contour=True)
                 extract_seg_from_color(seg_color_path, line_path, seg_path)
@@ -153,8 +157,20 @@ if __name__ == "__main__":
     treat_as_final = args.treat_as_final
     force_cpu = args.force_cpu
 
+    # Immediate device check to confirm hardware status before heavy tasks
+    if force_cpu:
+        device = torch.device('cpu')
+    else:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    print("\n" + "=" * 60)
+    print(f" HARDWARE STATUS: {'GPU (CUDA) DETECTED' if device.type == 'cuda' else 'CPU ONLY MODE'}")
+    if device.type == 'cuda':
+        print(f" DEVICE NAME:    {torch.cuda.get_device_name(0)}")
+    print("=" * 60 + "\n")
+
     if not skip_seg:
-        generate_seg(path, seg_type, radius, save_color_seg, multi_clip, line_thr, treat_as_final)
+        generate_seg(path, seg_type, radius, save_color_seg, multi_clip, line_thr, treat_as_final, device=device)
 
     if use_light_model:
         ckpt_path = "ckpt/basicpbc_light.pth"
@@ -178,19 +194,6 @@ if __name__ == "__main__":
             raft_resolution=(raft_resolution, raft_resolution),
             clip_resolution=(320, 320),
         )
-
-    if force_cpu:
-        device = torch.device('cpu')
-    else:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    print("\n" + "*" * 50)
-    if device.type == 'cuda':
-        print(f" STATUS: Running on GPU (CUDA) [OK]")
-        print(f" DEVICE: {torch.cuda.get_device_name(0)}")
-    else:
-        print(f" STATUS: Running on CPU [WARN]")
-    print("*" * 50 + "\n")
 
     model = model.to(device)
     model.load_state_dict(load_params(ckpt_path, device))

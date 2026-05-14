@@ -27,10 +27,8 @@ INBETWEEN_BG = QColor(0, 191, 255)   # bright blue
 GT_BG = QColor(173, 216, 230)       # light blue
 
 
-# -------------------------------------------------------------------
+
 #  ReorderListWidget (supports drag‑n‑drop reordering with visual placeholder,
-#  multi‑selection dragging and auto‑scroll)
-# -------------------------------------------------------------------
 class ReorderListWidget(QListWidget):
     """Shows a coloured placeholder that moves items out of the way while dragging."""
     reordered = Signal()
@@ -260,10 +258,7 @@ class ReorderListWidget(QListWidget):
                 self.takeItem(row)
             self._placeholder_item = None
 
-
-# -------------------------------------------------------------------
 #  LandingPage (Introduction for new users)
-# -------------------------------------------------------------------
 class LandingPage(QFrame):
     """An introductory page shown when no frames are loaded."""
     clicked = Signal()
@@ -312,10 +307,7 @@ class LandingPage(QFrame):
         self.clicked.emit()
         super().mousePressEvent(event)
 
-
-# -------------------------------------------------------------------
 #  HelpPage (single column, scrollable, with shortcuts)
-# -------------------------------------------------------------------
 class HelpPage(QScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -384,10 +376,7 @@ class HelpPage(QScrollArea):
         layout.addStretch()
         self.setWidget(content)
 
-
-# -------------------------------------------------------------------
-#  FrameViewer (Shared component for Timeline and Results)
-# -------------------------------------------------------------------
+#  FrameViewer 
 class FrameViewer(QWidget):
     """A widget that can toggle between a Tile View (grid) and Player View (one-at-a-time)."""
     
@@ -507,10 +496,7 @@ class FrameViewer(QWidget):
             pix = QPixmap(item.data(Qt.UserRole))
             self.preview_label.setPixmap(pix.scaled(self.preview_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
-
-# -------------------------------------------------------------------
 #  Worker thread for inference
-# -------------------------------------------------------------------
 class InferenceWorker(QThread):
     log_signal = Signal(str)
     status_signal = Signal(str)
@@ -735,10 +721,7 @@ class InferenceWorker(QThread):
                 except Exception:
                     pass
 
-
-# -------------------------------------------------------------------
 #  Main Application
-# -------------------------------------------------------------------
 class ColorizationApp(QMainWindow):
     def __init__(self):
         super().__init__()
