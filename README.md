@@ -100,4 +100,7 @@ Use these shortcuts to speed up your animation pipeline:
 *   **Diagnostic Banner:** When you run the model, check the console for the `--> Execution Device` message. It will confirm if you are running on **GPU (CUDA)** or **CPU**.
 
 ---
+
+## This project was built with using https://github.com/ykdai/BasicPBC Thank You so much for making this possible
+
 *CART is an open-source project dedicated to empowering the animation community. Please respect the intellectual property of fellow artists.*
